@@ -168,13 +168,18 @@ init([Args, Owner]) ->
     SSLOpts = proplists:get_value(ssl_opts, Args, []),
     %% Disable http2 in protocols
     TransportOpts = case SSL of
-                    true ->
-                        #{transport => tls, protocols => [http],
-                          transport_opts => SSLOpts};
-                    _ ->
-                        #{transport => tcp, protocols => [http]}
+                        true ->
+                            #{transport => tls, protocols => [http],
+                            transport_opts => SSLOpts};
+                        _ ->
+                            #{transport => tcp, protocols => [http]}
                 end,
-    {ok, ConnPid} = gun:open(Host, Port, TransportOpts),
+    {ok, ConnPid} = case Host of
+                        {local, Path} ->
+                            gun:unix_open(Path, TransportOpts);
+                        _ ->
+                            gun:open(Host, Port, TransportOpts)
+                    end,
     {ok, http} = gun:await_up(ConnPid),
     WSUpgradeHeaders = [{<<"sec-websocket-protocol">>, <<"xmpp">>}],
     StreamRef = gun:ws_upgrade(ConnPid, Resource, WSUpgradeHeaders,
@@ -310,7 +315,9 @@ get_resource(Args, Default) ->
 get_legacy_ws(Args, Default) ->
     get_option(wslegacy, Args, Default).
 
--spec maybe_binary_to_list(binary() | string()) -> string().
+-spec maybe_binary_to_list({local, binary() | string()} | binary() | string()) -> string() | {local, string()}.
+maybe_binary_to_list({local, B}) when is_binary(B) -> {local, binary_to_list(B)};
+maybe_binary_to_list({local, S}) when is_list(S) -> {local, S};
 maybe_binary_to_list(B) when is_binary(B) -> binary_to_list(B);
 maybe_binary_to_list(S) when is_list(S) -> S.
 

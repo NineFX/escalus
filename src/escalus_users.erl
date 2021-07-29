@@ -319,10 +319,11 @@ try_check_mod_register(Config) ->
 
 -spec is_mod_register_enabled(escalus:config()) -> boolean().
 is_mod_register_enabled(Config) ->
+    Transport = escalus_config:get_config(escalus_transport, Config, escalus_tcp),
     Server = escalus_config:get_config(escalus_server, Config, <<"localhost">>),
     Host = escalus_config:get_config(escalus_host, Config, Server),
     Port = escalus_config:get_config(escalus_port, Config, 5222),
-    ClientProps = [{server, Server}, {host, Host}, {port, Port}],
+    ClientProps = [{server, Server}, {host, Host}, {port, Port}, {transport, Transport}],
     {ok, Conn, _} = escalus_connection:start(ClientProps,
                                                 [start_stream,
                                                  stream_features,
