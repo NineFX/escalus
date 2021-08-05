@@ -18,14 +18,16 @@
          post_story/1, 
          name/0]).
 
+-export([seed_domains/1,
+         refresh_db/1]).
+
 %%-----------------------------------------------------------------------------------------------%%
 %                          BEGIN escalus_server BEHAVIOUR IMPLEMENTATION                          %
 %%-----------------------------------------------------------------------------------------------%%
 -spec pre_story(escalus:config()) -> escalus:config().
 pre_story(Config) ->
-    Opts = escalus_config:get_config(epgsql_config, Config),
-    {ok, Conn} = epgsql:connect(Opts),
-    lists:keystore(epgsql_conn, 1, Config, {epgsql_conn, Conn}).
+    {ok, _} = application:ensure_all_started(shortfin),
+    Config.
 
 
 -spec post_story(escalus:config()) -> escalus:config().
@@ -46,7 +48,7 @@ name() ->
 %%-----------------------------------------------------------------------------------------------%%
 
 start(_) ->
-    application:ensure_all_started(epgsql).
+    ok.
 
 stop(_) ->
     ok.
@@ -59,39 +61,63 @@ create_users(Config, Users) ->
 
 -spec delete_users(escalus:config(), [escalus_users:named_user()]) -> escalus:config().
 delete_users(Config, Users) ->
-    lists:foreach(fun({_, Spec}) -> unregister_user(Config, Spec) end, Users),
+    lists:foreach(fun({_, Spec}) -> 
+        unregister_user(Config, Spec) 
+    end, Users),
     Config.
 
 db_init_domains(Config) ->
-    Domain = escalus_config:get_config(shortfin_domain, Config),
-    Conn = escalus_config:get_config(epgsql_conn, Config),
-    {ok, _, _} = epgsql:equery(Conn, "INSERT INTO domains (domain) VALUES ($1) ON CONFLICT DO NOTHING", [Domain]).
+    Domains = escalus_config:get_config(shortfin_domains, Config),
+    lists:foreach(fun({Domain, Vhosts}) ->
+        Id = case shortfin_query:register_domain(Domain) of
+                ok ->
+                    Id_ = shortfin_query:get_domain_id(Domain),
+                    Id_;
+                DomId when is_integer(DomId) ->
+                    DomId
+            end,
+        ok = shortfin_query:add_vhosts([[H, Id] || H <- Vhosts])
+    end, Domains).
 
-hash(Value) ->
-    Salt = <<"edde84fd-39e7-431b-b6e8-a9810b33dbe4">>,
-    {ok, Key} = pbkdf2:pbkdf2(Value, Salt, 4096, 20),
-    Key.
+db_clear_domains(Config) ->
+    Domains = escalus_config:get_config(shortfin_domains, Config),
+    lists:foreach(fun({Domain, _}) ->
+        Id = shortfin_query:get_domain_id(Domain),
+        shortfin_query:unregister_domain(Id)
+    end, Domains).
 
 register_user(Config, Spec) ->
     [User, Server, Pass] = escalus_users:get_usp(Config, Spec),
-    Conn = escalus_config:get_config(epgsql_conn, Config),
-    Hash = hash(Pass),
-    {ok, _, _} = epgsql:equery(Conn, "INSERT INTO users (node, domain_id, password)
-                                      SELECT $1, domain_id, $3
-                                      FROM domains
-                                      WHERE domain = $2", [User, Server, Hash]).
+    _Id = shortfin_query:register_user(User, Server, Pass),
+    ok.
 
 unregister_user(Config, Spec) ->
     [User, Server, Pass] = escalus_users:get_usp(Config, Spec),
-    Conn = escalus_config:get_config(epgsql_conn, Config),
-    Hash = hash(Pass),
-    {ok, _, _} = epgsql:equery(Conn, "DELETE FROM users AS u
-                                      USING domains AS d
-                                      WHERE u.domain_id = d.domain_id AND
-                                            u.password=$3 AND
-                                            d.domain=$2 AND
-                                            u.node=$1 AND", [User, Server, Hash]).
+    ok = shortfin_query:unregister_user(User, Server, Pass),
+    ok.
 
 %%-----------------------------------------------------------------------------------------------%%
 %                           END escalus_user_db BEHAVIOUR IMPLEMENTATION                          %
 %%-----------------------------------------------------------------------------------------------%%
+
+%%-----------------------------------------------------------------------------------------------%%
+%                         BEGIN escalus_shortfin PUBLIC API IMPLEMENTATION                        %
+%%-----------------------------------------------------------------------------------------------%%
+
+%%-----------------------------------------------------------------------------------------------%%
+%                          END escalus_shortfin PUBLIC API IMPLEMENTATION                         %
+%%-----------------------------------------------------------------------------------------------%%
+
+-spec seed_domains(escalus:config()) -> ok.
+seed_domains(Config) ->
+    % start shortfin in order to access db functions
+    {ok, _} = application:ensure_all_started(shortfin),
+    % init the domains and vhosts defined in config
+    db_init_domains(Config),
+    %application:takeover(shortfin, permanent),
+    ok.
+    
+
+-spec refresh_db(escalus:config()) -> ok.
+refresh_db(Config) ->
+    db_clear_domains(Config).

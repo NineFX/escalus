@@ -179,7 +179,7 @@ prepare_step(Fun) when is_function(Fun, 2) ->
 
 -spec connect(escalus_users:user_spec()) -> client().
 connect(Props) ->
-    Transport = proplists:get_value(transport, Props, escalus_tcp),
+    Transport = proplists:get_value(transport, Props, escalus_ws),
     Server = proplists:get_value(server, Props, <<"localhost">>),
     Host = proplists:get_value(host, Props, Server),
     NewProps = lists:keystore(host, 1, Props, {host, Host}),
@@ -484,7 +484,6 @@ default_connection_steps() ->
      authenticate,
      maybe_use_compression,
      bind,
-     session,
      maybe_stream_management,
      maybe_use_carbons].
 

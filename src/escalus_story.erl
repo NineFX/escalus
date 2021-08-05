@@ -223,8 +223,9 @@ clients_from_resource_counts(Config, ResourceCounts) ->
                                                   ResourceCounts)].
 
 resources_per_spec(UserSpec, ResCount) ->
-    [{UserSpec, list_to_binary("res" ++ integer_to_list(N))}
-     || N <- lists:seq(1, ResCount)].
+    Resource = shortfin_uuid:gen(),
+    [{UserSpec, Resource}
+     || _ <- lists:seq(1, ResCount)].
 
 clients_as_arguments_or_list(Opts, Clients) ->
     case proplists:get_value(clients_as_list, Opts, false) of

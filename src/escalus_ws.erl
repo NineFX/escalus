@@ -8,6 +8,7 @@
 -behaviour(gen_server).
 -behaviour(escalus_connection).
 
+-include_lib("common_test/include/ct.hrl").
 -include_lib("exml/include/exml_stream.hrl").
 -include("escalus.hrl").
 
@@ -160,6 +161,14 @@ assert_stream_end(StreamEndRep, Props) ->
 -spec init(list()) -> {ok, state()}.
 init([Args, Owner]) ->
     Host = get_host(Args, "localhost"),
+    case Host of
+        {local, Path} ->
+            uds_init(Path, Args, Owner);
+        _ ->
+            tcp_init(Host, Args, Owner)
+    end.
+
+tcp_init(Host, Args, Owner) ->
     Port = get_port(Args, 5280),
     Resource = get_resource(Args, "/ws-xmpp"),
     LegacyWS = get_legacy_ws(Args, false),
@@ -174,12 +183,7 @@ init([Args, Owner]) ->
                         _ ->
                             #{transport => tcp, protocols => [http]}
                 end,
-    {ok, ConnPid} = case Host of
-                        {local, Path} ->
-                            gun:unix_open(Path, TransportOpts);
-                        _ ->
-                            gun:open(Host, Port, TransportOpts)
-                    end,
+    {ok, ConnPid} = gun:open(Host, Port, TransportOpts),
     {ok, http} = gun:await_up(ConnPid),
     WSUpgradeHeaders = [{<<"sec-websocket-protocol">>, <<"xmpp">>}],
     StreamRef = gun:ws_upgrade(ConnPid, Resource, WSUpgradeHeaders,
@@ -197,13 +201,36 @@ init([Args, Owner]) ->
                 legacy_ws = LegacyWS,
                 event_client = EventClient}}.
 
+uds_init(Path, Args, Owner) ->
+    Resource = get_resource(Args, "/ws-xmpp"),
+    EventClient = proplists:get_value(event_client, Args),
+    Host = proplists:get_value(server, Args, "localhost"),
+    %% Disable http2 in protocols
+    TransportOpts = #{transport => tcp, protocols => [http], transport_opts => []},
+    {ok, ConnPid} = gun:open_unix(Path, TransportOpts),
+    {ok, http} = gun:await_up(ConnPid),
+    WSUpgradeHeaders = [{<<"sec-websocket-protocol">>, <<"xmpp">>},
+                        {<<"host">>, Host}
+                        | get_option(client_headers, Args, [])],
+    StreamRef = gun:ws_upgrade(ConnPid, Resource, WSUpgradeHeaders,
+                               #{protocols => [{<<"xmpp">>, gun_ws_h}]}),
+    Timeout = get_option(ws_upgrade_timeout, Args, 5000),
+    wait_for_ws_upgrade(ConnPid, StreamRef, Timeout),
+    ParserOpts = [{infinite_stream, true}, {autoreset, true}],
+    {ok, Parser} = exml_stream:new_parser(ParserOpts),
+    {ok, #state{owner = Owner,
+                socket = ConnPid,
+                parser = Parser,
+                legacy_ws = false,
+                event_client = EventClient}}.
+
 wait_for_ws_upgrade(ConnPid, StreamRef, Timeout) ->
     receive
         {gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _} ->
             ok;
-        {gun_response, ConnPid, _, _, Status, Headers} ->
+        {gun_response, ConnPid, StreamRef, _IsFin, Status, Headers} ->
             exit({ws_upgrade_failed, Status, Headers});
-        {gun_error, ConnPid, _StreamRef, Reason} ->
+        {gun_error, ConnPid, StreamRef, Reason} ->
             exit({ws_upgrade_failed, Reason})
     after %% More clauses here as needed.
           Timeout ->
@@ -303,7 +330,7 @@ common_terminate(_Reason, #state{parser = Parser}) ->
 get_port(Args, Default) ->
     get_option(port, Args, Default).
 
--spec get_host(list(), string()) -> string().
+-spec get_host(list(), string()) -> {local, string()} | string().
 get_host(Args, Default) ->
     maybe_binary_to_list(get_option(host, Args, Default)).
 
@@ -315,16 +342,18 @@ get_resource(Args, Default) ->
 get_legacy_ws(Args, Default) ->
     get_option(wslegacy, Args, Default).
 
--spec maybe_binary_to_list({local, binary() | string()} | binary() | string()) -> string() | {local, string()}.
+-spec maybe_binary_to_list({local, binary() | string()} | binary() | string() | undefined) -> string() | {local, string()}.
 maybe_binary_to_list({local, B}) when is_binary(B) -> {local, binary_to_list(B)};
 maybe_binary_to_list({local, S}) when is_list(S) -> {local, S};
 maybe_binary_to_list(B) when is_binary(B) -> binary_to_list(B);
-maybe_binary_to_list(S) when is_list(S) -> S.
+maybe_binary_to_list(S) when is_list(S) -> S;
+maybe_binary_to_list(undefined) -> "".
 
 -spec get_option(any(), list(), any()) -> any().
 get_option(Key, Opts, Default) ->
     case lists:keyfind(Key, 1, Opts) of
         false -> Default;
+        {Key, undefined} -> Default;
         {Key, Value} -> Value
     end.
 

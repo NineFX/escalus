@@ -210,7 +210,8 @@ get_options(Config, User) ->
      {host, get_host(Config, User)},
      {port, get_port(Config, User)},
      {auth, get_auth_method(Config, User)},
-     {wspath, get_wspath(Config, User)}
+     {wspath, get_wspath(Config, User)},
+     {transport, escalus_config:get_config(transport, Config, escalus_ws)}
      | get_userspec(Config, User)].
 
 -spec get_options(escalus:config(), user(), binary()) -> escalus:config().
@@ -308,7 +309,7 @@ auth_type({module, M, Args}, _Config) -> {module, M, Args};
 auth_type({module, M}, _Config) -> {module, M, []};
 auth_type(_, Config) ->
     case try_check_mod_register(Config) of
-        false -> {module, escalus_ejabberd, []};
+        false -> {module, escalus_shortfin, []};
         true -> xmpp
     end.
 
@@ -323,7 +324,16 @@ is_mod_register_enabled(Config) ->
     Server = escalus_config:get_config(escalus_server, Config, <<"localhost">>),
     Host = escalus_config:get_config(escalus_host, Config, Server),
     Port = escalus_config:get_config(escalus_port, Config, 5222),
-    ClientProps = [{server, Server}, {host, Host}, {port, Port}, {transport, Transport}],
+    SSL = escalus_config:get_config(ssl, Config, true),
+    SslOpts = escalus_config:get_config(ssl_opts, Config, []),
+    WSPath = escalus_config:get_config(wspath, Config, <<"/ws-xmpp">>),
+    ClientProps = [{server, Server}, 
+                   {host, Host}, 
+                   {port, Port}, 
+                   {transport, Transport},
+                   {ssl, SSL},
+                   {ssl_opts, SslOpts},
+                   {wspath, WSPath}],
     {ok, Conn, _} = escalus_connection:start(ClientProps,
                                                 [start_stream,
                                                  stream_features,

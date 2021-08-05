@@ -13,8 +13,7 @@
          use_ssl/2,
          can_use_amp/2,
          can_use_compression/2,
-         can_use_stream_management/2,
-         session/1]).
+         can_use_stream_management/2]).
 
 %% New style connection initiation
 -export([start_stream/2,
@@ -27,8 +26,7 @@
          stream_management/2,
          stream_resumption/2,
          authenticate/2,
-         bind/2,
-         session/2]).
+         bind/2]).
 
 -export([send_presence_available/1,
          send_presence_unavailable/1]).
@@ -123,13 +121,6 @@ use_zlib(Client) ->
     escalus:assert(is_compressed, Compressed),
     escalus_connection:use_zlib(Client),
     start_stream(Client).
-
--spec session(client()) -> client().
-session(Client) ->
-    escalus_connection:send(Client, escalus_stanza:session()),
-    SessionReply = escalus_connection:get_stanza(Client, session_reply),
-    escalus:assert(is_iq_result, SessionReply),
-    Client.
 
 -spec send_presence_available(escalus:client()) -> ok.
 send_presence_available(Client) ->
@@ -267,10 +258,6 @@ authenticate(Client, Features) ->
 -spec ?CONNECTION_STEP_SIG(bind).
 bind(Client, Features) ->
     {bind(Client), Features}.
-
--spec ?CONNECTION_STEP_SIG(session).
-session(Client, Features) ->
-    {session(Client), Features}.
 
 %%%===================================================================
 %%% Helpers
